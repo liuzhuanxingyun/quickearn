@@ -1,0 +1,38 @@
+# README.md
+
+## 项目描述
+这是一个基于 Python 的量化交易回测项目，使用 backtesting 库对 BTC/USDT 15 分钟 K 线数据进行 EMA-ATR 趋势策略的回测。策略通过 EMA 和 ATR 计算上下轨，当价格突破时进行买卖操作。支持单次回测和批量优化（使用 SAMBO 方法）。
+
+## 安装
+1. 克隆或下载项目到本地。
+2. 安装依赖：
+   - requirements.txt 内容。
+3. 确保数据文件位于 `BTCUSDT-15m` 目录下（CSV 格式，包含 `open_time`、`open`、`high`、`low`、`close`、`volume` 等列）。
+
+## 使用
+1. 激活环境（假设使用虚拟环境，如 venv 或 conda）。
+2. 运行回测：
+   - 默认启用批量回测（`is_batch_test = True`），优化 EMA 周期、ATR 周期和乘数。
+   - 输出热力图（heatmap），显示参数组合的效果。
+   - 如需单次回测，将 `is_batch_test` 设为 False。
+3. 查看结果：
+   - 控制台输出统计数据和交易记录。
+   - 交易详情保存到 `trades.csv`。
+   - 可视化图表保存到 `ema_atr_strategy.html`（需取消注释 `bt.plot`）。
+
+## 文件结构
+- `ema_atr_trend.py`: 主脚本，定义策略和回测逻辑。
+- `utils.py`: 工具函数，负责数据合并和加载。
+- `data`: 数据目录，存放 CSV 文件。
+- `result`: 输出目录，存放交易记录。
+- `examples`: 示例输出目录，存放图表。
+- `requirements.txt`: 依赖包列表。
+
+## 注意事项
+- 数据时间戳需为毫秒级 Unix 时间戳。
+- 批量优化参数空间大，可能耗时长；可调整范围减少组合。
+- 策略为示例，仅供学习；实际交易请谨慎。
+- 依赖 TA-Lib，可能需额外安装系统库（如 macOS 上 `brew install ta-lib`）。
+
+## 许可证
+MIT License。
