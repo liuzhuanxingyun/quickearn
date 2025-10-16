@@ -9,7 +9,11 @@ from tqdm import tqdm
 import zipfile  # 添加解压所需的模块
 
 # 合并数据
-def merge_csv_files(directory='data/BTCUSDT-15m/', output_file='data/merged_BTCUSDT-15m.csv'):
+def merge_csv_files(symbol='BTCUSDT', interval='15m', directory=None, output_file=None):
+    if directory is None:
+        directory = f'data/{symbol}-{interval}/'
+    if output_file is None:
+        output_file = f'data/merged_{symbol}-{interval}.csv'
     try:
         csv_files = glob.glob(f'{directory}*.csv')
         if not csv_files:
