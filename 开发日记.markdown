@@ -20,6 +20,12 @@ git add <文件名>
 git commit -m "提交消息"
 ```
 
+## 上传到github
+
+```bash
+git push origin main  
+```
+
 ### Conventional Commits 中的常见前缀
 以下是约定俗成的提交前缀（基于Conventional Commits规范），用于分类提交类型：
 
@@ -93,14 +99,16 @@ FractionalBacktest可允许分数btc交易
 
 ## 10.16
 ✅15.输出的文件名要为最佳胜率及其交易数量
-16.现在改为每一次的回测后，csv和html的文件都放在一个新的文件夹里面，这个文件夹放在result里面
+✅16.现在改为每一次的回测后，csv和html的文件都放在一个新的文件夹里面，这个文件夹放在result里面
+
+10.18
+✅17.增加了3d热力图
 
 
-
-
-
+时间区域的选择
 全面探寻模块化的可能
 封装整个策略，再是ui的构建
 
-
+盈亏比要高，
+实盘中判断是否适合追趋势
 

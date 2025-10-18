@@ -6,11 +6,11 @@ import os
 from datetime import datetime
 from backtesting import Backtest, Strategy
 from backtesting.lib import crossover, plot_heatmaps
-from utils import load_and_process_data, merge_csv_files, send_email_notification, download_binance_data, unzip_binance_data
+from utils import load_and_process_data, merge_csv_files, send_email_notification, download_binance_data, unzip_binance_data, create_3d_heatmap_cube
 
 def custom_maximize(stats):
     # 检查交易数量和胜率有效性
-    if (stats['# Trades'] < 84 or
+    if (stats['# Trades'] < 180 or
         pd.isna(stats['Win Rate [%]'])):
         return 0
     # 直接返回胜率（百分比形式）
@@ -18,7 +18,7 @@ def custom_maximize(stats):
 
 # 设置开关
 is_download_data = False  # 是否下载数据
-is_batch_test = False  # 是否进行批量回测
+is_batch_test = True  # 是否进行批量回测
 is_send_batch_email = True  # 批量回测邮件开关
 is_send_single_email = False  # 单次回测邮件开关
 
@@ -30,15 +30,16 @@ if is_download_data:
 data = load_and_process_data('data/merged_BTCUSDT-15m.csv')
 # data/ETHUSDT-15m/ETHUSDT-15m-2025-01.csv
 # data/BTCUSDT-15m/BTCUSDT-15m-2025-09.csv
+# data/merged_BTCUSDT-15m.csv
 # 测试用
 
 print(data.head())
 
 class EmaAtrStrategy(Strategy):
-    ema_period = 135
-    atr_period = 6
-    multiplier = 9
-    atr_threshold_pct = 0.004  # ATR波动率过滤器阈值（百分比，基于当前价格）
+    ema_period = 51
+    atr_period = 3
+    multiplier = 2
+    atr_threshold_pct = 0.00980  # ATR波动率过滤器阈值（百分比，基于当前价格）
     rr = 2.0  # 风险回报比：止盈距离 = 止损距离 * rr
 
     def init(self):
@@ -65,15 +66,15 @@ class EmaAtrStrategy(Strategy):
             elif crossover(lower, self.data.Close):
                 self.sell(tp=self.data.Close - tp_distance, sl=self.data.Close + sl_distance)
 
-bt = Backtest(data, EmaAtrStrategy, cash=1_000_000_000, commission=0.0005)  
+bt = Backtest(data, EmaAtrStrategy, cash=1_000_000_000_000, commission=0.0005)  
 
 if is_batch_test:
     # 定义优化参数
-    ema_period_range = range(55, 155, 20)
-    atr_period_range = np.arange(6, 16, 2)
-    multiplier_range = list(np.arange(0.05, 10.05, 1))
-    atr_threshold_pct_range = list(np.arange(0, 0.01, 0.002))  # ATR阈值百分比范围
-    rr_range = [1]
+    ema_period_range = range(5, 205, 2)
+    atr_period_range = list(np.arange(3, 13, 1))  # 转换为list
+    multiplier_range = list(np.arange(1, 11, 0.1))
+    atr_threshold_pct_range = list(np.arange(0.0001, 0.0101, 0.0001))
+    rr_range = [2]
     
     # 自动计算组合总数
     total_combinations = (len(ema_period_range) * len(atr_period_range) * 
@@ -86,8 +87,12 @@ if is_batch_test:
         multiplier=multiplier_range,
         atr_threshold_pct=atr_threshold_pct_range,  # 调整ATR阈值百分比范围
         rr=rr_range,  # 新增rr优化参数
-        max_tries=1000,
+
+        max_tries=5,
         method='sambo', 
+        # method='grid',
+
+        
         # return_optimization=True,
         return_heatmap=True,
 
@@ -95,10 +100,40 @@ if is_batch_test:
         maximize=custom_maximize
     )
     print(heatmap)
-    # 生成时间戳并创建新文件夹
+    
+    # 新增：为 heatmap 添加交易数量列
+    trades_list = []
+    for params in heatmap.index:
+        param_dict = dict(zip(heatmap.index.names, params))
+        temp_stats = bt.run(**param_dict)
+        trades_list.append(temp_stats['# Trades'])
+    
+    # 将 heatmap 转换为 DataFrame 并添加交易数量
+    heatmap_df = heatmap.reset_index()
+    heatmap_df.columns = ['ema_period', 'atr_period', 'multiplier', 'atr_threshold_pct', 'rr', 'win_rate']
+    heatmap_df['# Trades'] = trades_list
+    
+    # 生成时间戳并创建新文件夹（移到此处，确保在 3D 热力图前定义）
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     batch_folder = f"result/batch_{timestamp}"
     os.makedirs(batch_folder, exist_ok=True)
+    
+    # 新增：创建三维热力图魔方（基于 ema_period, atr_period, multiplier）
+    # 假设其他参数固定或聚合（例如，取 atr_threshold_pct 和 rr 的最佳或平均）
+    # 这里我们聚合 heatmap 到这三个参数的平均胜率
+    
+    # 聚合：对 ema_period, atr_period, multiplier 分组，取 win_rate 的最大值（或平均）
+    aggregated = heatmap_df.groupby(['ema_period', 'atr_period', 'multiplier'])['win_rate'].max().reset_index()
+    
+    # 调试：打印 aggregated 以确认数据
+    print("Aggregated DataFrame:")
+    print(aggregated.head())
+    
+    # 调用函数创建 3D 热力图
+    try:
+        create_3d_heatmap_cube(aggregated, batch_folder)
+    except Exception as e:
+        print(f"3D 热力图生成失败: {e}")
     
     # 修改文件名以包含最佳胜率和交易数量
     win_rate = stats['Win Rate [%]']
@@ -106,7 +141,7 @@ if is_batch_test:
     heatmap_filename = f'{batch_folder}/heatmap_win{win_rate}_trades{num_trades}.csv'
     plot_filename = f'{batch_folder}/heatmap_win{win_rate}_trades{num_trades}.html'
     plot_heatmaps(heatmap, filename=plot_filename, open_browser=True)
-    heatmap.to_csv(heatmap_filename, index=True)
+    heatmap_df.to_csv(heatmap_filename, index=False)  # 使用 heatmap_df 保存，包含 # Trades 列
     
     if is_send_batch_email:
         # 发送邮件提醒

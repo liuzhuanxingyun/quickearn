@@ -6,7 +6,12 @@ from email.mime.multipart import MIMEMultipart
 import os
 import requests
 from tqdm import tqdm
-import zipfile  # 添加解压所需的模块
+import zipfile
+import plotly.graph_objects as go
+from dotenv import load_dotenv  # 添加此导入
+
+# 在文件顶部加载 .env 文件
+load_dotenv()
 
 # 合并数据
 def merge_csv_files(symbol='BTCUSDT', interval='15m', directory=None, output_file=None):
@@ -146,13 +151,25 @@ def unzip_binance_data(symbol='ETCUSDT', interval='15m', save_dir='./data'):
 def send_email_notification(
     subject,
     body,
-    to_email='2160255989@qq.com',
-    from_email='2243709509@qq.com',
+    to_email=None,
+    from_email=None,
     smtp_server='smtp.qq.com',
     smtp_port=587,
-    smtp_user='2243709509@qq.com',
-    smtp_password='xmvvfznyknrgdjja'
+    smtp_user=None,
+    smtp_password=None
 ):
+    # 从环境变量读取敏感信息
+    if to_email is None:
+        to_email = os.getenv('EMAIL_TO')
+    if from_email is None:
+        from_email = os.getenv('EMAIL_FROM')
+    if smtp_user is None:
+        smtp_user = os.getenv('SMTP_USER')
+    if smtp_password is None:
+        smtp_password = os.getenv('SMTP_PASSWORD')
+        if smtp_password is None:
+            raise ValueError("SMTP_PASSWORD 环境变量未设置，无法发送邮件。")
+    
     try:
         msg = MIMEMultipart()
         msg['From'] = from_email
@@ -170,5 +187,50 @@ def send_email_notification(
         print("邮件发送成功。")
     except Exception as e:
         print(f"邮件发送失败：{e}")
+
+def create_3d_heatmap_cube(aggregated, batch_folder, title='3D Heatmap Cube: EMA Period vs ATR Period vs Multiplier'):
+    """
+    创建并保存 3D 热力图魔方。
+    
+    参数:
+    - aggregated: DataFrame，包含 'ema_period', 'atr_period', 'multiplier', 'win_rate' 列
+    - batch_folder: str，保存文件夹路径
+    - title: str，图表标题
+    """
+    try:
+        # 创建 3D 散点图（热力图魔方）
+        fig = go.Figure(data=[go.Scatter3d(
+            x=aggregated['ema_period'],
+            y=aggregated['atr_period'],
+            z=aggregated['multiplier'],
+            mode='markers',
+            marker=dict(
+                size=5,
+                color=aggregated['win_rate'],  # 颜色表示胜率
+                colorscale='Viridis',  # 颜色尺度
+                colorbar=dict(title='Win Rate (%)'),
+                showscale=True
+            ),
+            text=aggregated['win_rate'].round(2),  # 悬停显示胜率
+            hovertemplate='EMA: %{x}<br>ATR: %{y}<br>Multiplier: %{z}<br>Win Rate: %{text}%'
+        )])
+        
+        fig.update_layout(
+            title=title,
+            scene=dict(
+                xaxis_title='EMA Period',
+                yaxis_title='ATR Period',
+                zaxis_title='Multiplier'
+            )
+        )
+        
+        # 保存为 HTML 文件
+        cube_filename = f'{batch_folder}/3d_heatmap_cube.html'
+        fig.write_html(cube_filename)
+        print(f"3D 热力图魔方已保存到: {cube_filename}")
+        return fig
+    except Exception as e:
+        print(f"函数内部错误: {e}")
+        return None
 
 
