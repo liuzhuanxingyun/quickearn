@@ -2,8 +2,9 @@ import os
 import ccxt
 import talib
 import pandas as pd
-import time # 导入 time 模块
+import time
 
+from datetime import datetime, timezone  # 添加 datetime 模块
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,6 +20,7 @@ EMA_PERIOD = 51  # EMA周期
 ATR_PERIOD = 3   # ATR周期
 MULTIPLIER = 2   # ATR倍数，用于计算轨道
 RR = 2.0  # 风险回报比
+ATR_THRESHOLD_PCT = 0.0098  # ATR波动率阈值百分比
 
 exchange = ccxt.okx({
     'apiKey': API_KEY,
@@ -50,9 +52,48 @@ def indicators(df):
     df['lower_band'] = df['ema'] - (MULTIPLIER * df['atr'])  # 下轨道
     return df
 
-def strategy(is_long=False):  # 添加布尔值参数，False=做空，True=做多
+def seek_mark():
+    df = get_ohlcv_data(exchange)
+    df = indicators(df)
+    
+    latest = df.iloc[-1]
+    previous = df.iloc[-2]
+    
+    # 检查当前是否有仓位
+    positions = exchange.fetch_positions()
+    has_position = any(pos['symbol'] == SYMBOL and pos['contracts'] != 0 for pos in positions)
+    
+    # 检查ATR波动率过滤器（基于当前价格的百分比）
+    # 如果ATR低于阈值百分比，不执行交易
+    volatility_filter = latest['atr'] / latest['close'] > ATR_THRESHOLD_PCT
+    
+    # 多头入场信号：1. 第n-1根k线的收盘价 <= upper_band
+    #                2. 第n根k线的收盘价 > upper_band
+    #                3. 波动过滤器值 > 阈值
+    #                4. 当前没有仓位
+    if not has_position and previous['close'] <= previous['upper_band'] and latest['close'] > latest['upper_band'] and volatility_filter:
+        return 'long_entry'
+    
+    # 空头入场信号：类似逻辑，1. 第n-1根k线的收盘价 >= lower_band
+    #                2. 第n根k线的收盘价 < lower_band
+    #                3. 波动过滤器值 > 阈值
+    #                4. 当前没有仓位
+    elif not has_position and previous['close'] >= previous['lower_band'] and latest['close'] < latest['lower_band'] and volatility_filter:
+        return 'short_entry'
+    
+    else:
+        return 'hold'
+
+def strategy():  # 移除 is_long 参数，根据信号自动决定
     try:
         exchange.set_leverage(2, SYMBOL)  # 设置2倍杠杆
+        
+        # 获取信号
+        signal = seek_mark()
+        
+        if signal == 'hold':
+            print("无信号，跳过交易。")
+            return
         
         # 获取ATR作为止损距离
         df = get_ohlcv_data(exchange)
@@ -64,13 +105,12 @@ def strategy(is_long=False):  # 添加布尔值参数，False=做空，True=做�
         
         entry_price = None
 
-        if is_long:
-            # 1. 先下市价单
+        if signal == 'long_entry':
+            # 做多逻辑
             order = exchange.create_market_buy_order(SYMBOL, 0.01)
             print("市价买入订单已提交:", order)
             
-            # 2. 等待订单成交并获取实际成交价
-            time.sleep(2) # 等待2秒，确保订单有足够时间成交
+            time.sleep(2)
             filled_order = exchange.fetch_order(order['id'], SYMBOL)
             
             if filled_order and filled_order['status'] == 'closed' and filled_order['average']:
@@ -78,19 +118,15 @@ def strategy(is_long=False):  # 添加布尔值参数，False=做空，True=做�
                 print(f"订单已成交，实际入场价: {entry_price}")
             else:
                 print("错误：无法获取订单成交价，取消设置止盈止损。")
-                # 此处可以添加逻辑，比如取消未成交的订单
                 return
 
-            # 3. 使用实际成交价计算并设置止盈止损
             sl_price = entry_price - sl_distance
             tp_price = entry_price + tp_distance
             print(f"止损价格: {sl_price}, 止盈价格: {tp_price}")
 
-            # --- 核心修改：将止损改为限价单 ---
-            # 创建一个“止损限价平仓”订单
             sl_order = exchange.create_stop_loss_order(
                 SYMBOL, 
-                'market',  # <--- 修改为 'limit'
+                'market', 
                 'sell', 
                 0.01, 
                 stopLossPrice=sl_price, 
@@ -98,11 +134,11 @@ def strategy(is_long=False):  # 添加布尔值参数，False=做空，True=做�
             )
             print("止损订单（卖出）已设置:", sl_order)
 
-            # 创建一个“限价止盈平仓”订单
             tp_order = exchange.create_take_profit_order(SYMBOL, 'limit', 'sell', 0.01, price=tp_price, takeProfitPrice=(entry_price + tp_price) / 2, params={'reduceOnly': True})
             print("止盈订单（卖出）已设置:", tp_order)
-        else:
-            # 做空逻辑类似
+        
+        elif signal == 'short_entry':
+            # 做空逻辑
             order = exchange.create_market_sell_order(SYMBOL, 0.01)
             print("市价卖出订单已提交:", order)
 
@@ -120,11 +156,9 @@ def strategy(is_long=False):  # 添加布尔值参数，False=做空，True=做�
             tp_price = entry_price - tp_distance
             print(f"止损价格: {sl_price}, 止盈价格: {tp_price}")
 
-            # --- 核心修改：将止损改为限价单 ---
-            # 创建一个“止损限价平仓”订单
             sl_order = exchange.create_stop_loss_order(
                 SYMBOL, 
-                'market',  # <--- 修改为 'limit'
+                'market', 
                 'buy', 
                 0.01, 
                 stopLossPrice=sl_price, 
@@ -132,7 +166,6 @@ def strategy(is_long=False):  # 添加布尔值参数，False=做空，True=做�
             )
             print("止损订单（买入）已设置:", sl_order)
 
-            # 创建一个“限价止盈平仓”订单
             tp_order = exchange.create_take_profit_order(SYMBOL, 'limit', 'buy', 0.01, price=tp_price, takeProfitPrice=(entry_price + tp_price) / 2, params={'reduceOnly': True})
             print("止盈订单（买入）已设置:", tp_order)
 
@@ -140,7 +173,35 @@ def strategy(is_long=False):  # 添加布尔值参数，False=做空，True=做�
         print(f"策略执行失败: {e}")
 
 def main():
-    strategy(is_long=True)  # 调用策略，默认做多
+    while True:  # 开始时间遍历，循环执行策略
+        try:
+            # 获取当前 UTC 时间
+            now = datetime.now(timezone.utc)
+            current_minute = now.minute
+            
+            # 计算当前分钟除以 15 的余数
+            remainder = current_minute % 15
+            
+            # 计算需要等待的时间（分钟）
+            wait_minutes = 0 if remainder == 0 else 15 - remainder
+            
+            # 转换为秒
+            wait_seconds = wait_minutes * 60
+            
+            print(f"当前 UTC 时间: {now}, 分钟余数: {remainder}, 等待 {wait_minutes} 分钟 ({wait_seconds} 秒)")
+            
+            time.sleep(wait_seconds)
+            
+            strategy()  # 调用策略
+            
+            time.sleep(60)  # 每次调用策略后休息 60 秒
+            
+        except KeyboardInterrupt:
+            print("用户中断，停止运行。")
+            break
+        except Exception as e:
+            print(f"主循环错误: {e}")
+            time.sleep(60)  # 出错后等待1分钟再试
 
 if __name__ == "__main__":
     main()

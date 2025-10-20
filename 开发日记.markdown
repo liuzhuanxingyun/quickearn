@@ -17,7 +17,7 @@ git add <文件名>
 创建提交并添加消息：
 
 ```bash
-git commit -m "提交消息"
+git commit -m "feat: feat: add live trading functionality"
 ```
 
 ## 上传到github
@@ -107,7 +107,14 @@ FractionalBacktest可允许分数btc交易
 ✅17. 增加了3d热力图
 
 10.20
-18. 模仿实际交易编写实盘代码
+✅18. 增加了实盘文件
+
+
+
+
+
+
+模仿实际交易编写实盘代码
 ✅首先找到信号，计算对应的开仓平仓价格
 ✅然后进入目标币，选择永续合约
 ✅接着选择逐仓
@@ -117,7 +124,7 @@ FractionalBacktest可允许分数btc交易
 等待成交
 
 
-
+增加一个可接受最大损失金额，设置为10u，然后计算每次
 
 
 
