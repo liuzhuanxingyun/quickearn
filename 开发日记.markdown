@@ -109,11 +109,16 @@ FractionalBacktest可允许分数btc交易
 10.20
 ✅18. 增加了实盘文件
 
+20.21
+✅19. 添加最大值止损金额限制，杠杆
+✅20. 杠杆好像没有生效
+已解决
+21. 把开单时间，交易信息也打印一下
+测试        size = 10 * RISK_USDT * FIXED_LEVERAGE / sl_distance
+是否有效
 
 
-
-
-
+            # exchange.edit_order(order['id'], SYMBOL, 'market', 'buy', 0.01)
 模仿实际交易编写实盘代码
 ✅首先找到信号，计算对应的开仓平仓价格
 ✅然后进入目标币，选择永续合约

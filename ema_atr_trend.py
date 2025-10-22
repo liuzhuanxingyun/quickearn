@@ -10,37 +10,37 @@ from utils import load_and_process_data, merge_csv_files, send_email_notificatio
 
 def custom_maximize(stats):
     # 检查交易数量和胜率有效性
-    if (stats['# Trades'] < 180 or
+    if (stats['# Trades'] < 30 or
         pd.isna(stats['Win Rate [%]'])):
         return 0
     # 直接返回胜率（百分比形式）
     return stats['Win Rate [%]']
 
 # 设置开关
-is_download_data = False  # 是否下载数据
-is_batch_test = True  # 是否进行批量回测
+is_download_data = True  # 是否下载数据
+is_batch_test = False  # 是否进行批量回测
 is_send_batch_email = True  # 批量回测邮件开关
 is_send_single_email = False  # 单次回测邮件开关
 
 if is_download_data:
-    download_binance_data(symbol='BTCUSDT', interval='15m', years=[2022], months=range(1, 13), save_dir='./data')
-    unzip_binance_data(symbol='BTCUSDT', interval='15m', save_dir='./data')  # 添加解压调用
-    merged_data = merge_csv_files(symbol='BTCUSDT', interval='15m')
+    download_binance_data(symbol='BCHUSDT', interval='15m', years=[2025], months=range(1, 10), save_dir='./data')
+    unzip_binance_data(symbol='BCHUSDT', interval='15m', save_dir='./data')  # 添加解压调用
+    merged_data = merge_csv_files(symbol='BCHUSDT', interval='15m')
 
-data = load_and_process_data('data/merged_BTCUSDT-15m.csv')
-# data/ETHUSDT-15m/ETHUSDT-15m-2025-01.csv
-# data/BTCUSDT-15m/BTCUSDT-15m-2025-09.csv
-# data/merged_BTCUSDT-15m.csv
+data = load_and_process_data('data/BCHUSDT-15m/BCHUSDT-15m-2025-09.csv')
+# data/BCHUSDT-15m/BCHUSDT-15m-2025-01.csv
+# data/ETHUSDT-15m/ETHUSDT-15m-2025-09.csv
+# data/merged_ETHUSDT-15m.csv
 # 测试用
 
 print(data.head())
 
 class EmaAtrStrategy(Strategy):
-    ema_period = 51
-    atr_period = 3
-    multiplier = 2
-    atr_threshold_pct = 0.00980  # ATR波动率过滤器阈值（百分比，基于当前价格）
-    rr = 2.0  # 风险回报比：止盈距离 = 止损距离 * rr
+    ema_period = 200
+    atr_period = 3.297
+    multiplier = 1.292
+    atr_threshold_pct = 0.00202  # ATR波动率过滤器阈值（百分比，基于当前价格）
+    rr = 0.5  # 风险回报比：止盈距离 = 止损距离 * rr
 
     def init(self):
         price = self.data.Close
@@ -71,10 +71,10 @@ bt = Backtest(data, EmaAtrStrategy, cash=1_000_000_000_000, commission=0.0005)
 if is_batch_test:
     # 定义优化参数
     ema_period_range = range(5, 205, 2)
-    atr_period_range = list(np.arange(3, 13, 1))  # 转换为list
-    multiplier_range = list(np.arange(1, 11, 0.1))
-    atr_threshold_pct_range = list(np.arange(0.0001, 0.0101, 0.0001))
-    rr_range = [2]
+    atr_period_range = list(np.arange(3, 13, 0.1))  # 转换为list
+    multiplier_range = list(np.arange(0.1, 10.1, 0.1))
+    atr_threshold_pct_range = list(np.arange(0.0001, 0.0101, 0.001))
+    rr_range = [0.5]
     
     # 自动计算组合总数
     total_combinations = (len(ema_period_range) * len(atr_period_range) * 
@@ -88,7 +88,7 @@ if is_batch_test:
         atr_threshold_pct=atr_threshold_pct_range,  # 调整ATR阈值百分比范围
         rr=rr_range,  # 新增rr优化参数
 
-        max_tries=5,
+        max_tries=5000,
         method='sambo', 
         # method='grid',
 

@@ -3,8 +3,7 @@ import ccxt
 import talib
 import pandas as pd
 import time
-
-from datetime import datetime, timezone  # 添加 datetime 模块
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,24 +12,27 @@ API_KEY = os.getenv('OKX_API_KEY')
 API_SECRET = os.getenv('OKX_API_SECRET')
 API_PASSPHRASE = os.getenv('OKX_API_PASSPHRASE')
 
-SYMBOL = 'BTC/USDT:USDT'  # 交易对
-TIMEFRAME = '15m'    # 时间帧
+FIXED_LEVERAGE = float(os.getenv('FIXED_LEVERAGE'))
+RISK_USDT = float(os.getenv('RISK_USDT'))
 
-EMA_PERIOD = 51  # EMA周期
-ATR_PERIOD = 3   # ATR周期
-MULTIPLIER = 2   # ATR倍数，用于计算轨道
-RR = 2.0  # 风险回报比
-ATR_THRESHOLD_PCT = 0.0098  # ATR波动率阈值百分比
+SYMBOL = 'BTC/USDT:USDT'
+TIMEFRAME = '1m'
+
+EMA_PERIOD = 13
+ATR_PERIOD = 14
+MULTIPLIER = 1
+ATR_THRESHOLD_PCT = 0
+RR = 1
 
 exchange = ccxt.okx({
     'apiKey': API_KEY,
     'secret': API_SECRET,
     'password': API_PASSPHRASE,
-    'enableRateLimit': True,  # 启用速率限制，避免API调用过频
-    'sandbox': True,  # 启用模拟账户
+    'enableRateLimit': True,
+    'sandbox': True,
     'options': {
-        'defaultType': 'swap',  # 默认交易类型为永续合约
-        'marginMode': 'isolated', # 逐仓模式
+        'defaultType': 'swap',
+        'marginMode': 'isolated',
     },
     'proxies': {
         'http': 'http://127.0.0.1:7897',  
@@ -48,8 +50,8 @@ def get_ohlcv_data(exchange, symbol=SYMBOL, timeframe=TIMEFRAME, limit=100):
 def indicators(df):
     df['ema'] = talib.EMA(df['close'], timeperiod=EMA_PERIOD)
     df['atr'] = talib.ATR(df['high'], df['low'], df['close'], timeperiod=ATR_PERIOD)
-    df['upper_band'] = df['ema'] + (MULTIPLIER * df['atr'])  # 上轨道
-    df['lower_band'] = df['ema'] - (MULTIPLIER * df['atr'])  # 下轨道
+    df['upper_band'] = df['ema'] + (MULTIPLIER * df['atr'])
+    df['lower_band'] = df['ema'] - (MULTIPLIER * df['atr'])
     return df
 
 def seek_mark():
@@ -59,65 +61,61 @@ def seek_mark():
     latest = df.iloc[-1]
     previous = df.iloc[-2]
     
-    # 检查当前是否有仓位
     positions = exchange.fetch_positions()
     has_position = any(pos['symbol'] == SYMBOL and pos['contracts'] != 0 for pos in positions)
     
-    # 检查ATR波动率过滤器（基于当前价格的百分比）
-    # 如果ATR低于阈值百分比，不执行交易
     volatility_filter = latest['atr'] / latest['close'] > ATR_THRESHOLD_PCT
     
-    # 多头入场信号：1. 第n-1根k线的收盘价 <= upper_band
-    #                2. 第n根k线的收盘价 > upper_band
-    #                3. 波动过滤器值 > 阈值
-    #                4. 当前没有仓位
     if not has_position and previous['close'] <= previous['upper_band'] and latest['close'] > latest['upper_band'] and volatility_filter:
         return 'long_entry'
     
-    # 空头入场信号：类似逻辑，1. 第n-1根k线的收盘价 >= lower_band
-    #                2. 第n根k线的收盘价 < lower_band
-    #                3. 波动过滤器值 > 阈值
-    #                4. 当前没有仓位
     elif not has_position and previous['close'] >= previous['lower_band'] and latest['close'] < latest['lower_band'] and volatility_filter:
         return 'short_entry'
     
     else:
-        return 'hold'
+        return 'hold'  
 
-def strategy():  # 移除 is_long 参数，根据信号自动决定
+def strategy():
     try:
-        exchange.set_leverage(2, SYMBOL)  # 设置2倍杠杆
-        
-        # 获取信号
+        # seek_mark() 返回交易信号
         signal = seek_mark()
         
         if signal == 'hold':
             print("无信号，跳过交易。")
             return
         
-        # 获取ATR作为止损距离
         df = get_ohlcv_data(exchange)
         df = indicators(df)
+
+        atr_value = df['atr'].iloc[-1]
+        sl_distance = atr_value
+        tp_distance = sl_distance * RR
         
-        atr_value = df['atr'].iloc[-1]  # 最新ATR值
-        sl_distance = atr_value  # 止损距离 = 1倍ATR
-        tp_distance = sl_distance * RR  # 止盈距离 = 止损距离 * RR
+        size = 10 * RISK_USDT * FIXED_LEVERAGE / sl_distance
+        print(f"计算得张数: {size:.6f}")
         
         entry_price = None
+        sl_order_id = None
+        tp_order_id = None
 
         if signal == 'long_entry':
-            # 做多逻辑
-            order = exchange.create_market_buy_order(SYMBOL, 0.01)
-            print("市价买入订单已提交:", order)
+            order = exchange.create_market_buy_order(SYMBOL, size)
+            order_id = order['id']
+            print(f"市价买入订单已提交，订单ID: {order_id}")
             
-            time.sleep(2)
-            filled_order = exchange.fetch_order(order['id'], SYMBOL)
+            time.sleep(1)
+            filled_order = exchange.fetch_order(order_id, SYMBOL)
             
             if filled_order and filled_order['status'] == 'closed' and filled_order['average']:
                 entry_price = filled_order['average']
                 print(f"订单已成交，实际入场价: {entry_price}")
             else:
                 print("错误：无法获取订单成交价，取消设置止盈止损。")
+                return
+
+            actual_size = float(filled_order.get('filled', filled_order.get('amount', size)))
+            if actual_size <= 0:
+                print("错误：成交张数为0，取消止损止盈设置。")
                 return
 
             sl_price = entry_price - sl_distance
@@ -128,28 +126,36 @@ def strategy():  # 移除 is_long 参数，根据信号自动决定
                 SYMBOL, 
                 'market', 
                 'sell', 
-                0.01, 
+                actual_size, 
                 stopLossPrice=sl_price, 
                 params={'reduceOnly': True}
             )
-            print("止损订单（卖出）已设置:", sl_order)
+            sl_order_id = sl_order['id']
+            print(f"止损订单（卖出）已设置，订单ID: {sl_order_id}")
 
-            tp_order = exchange.create_take_profit_order(SYMBOL, 'limit', 'sell', 0.01, price=tp_price, takeProfitPrice=(entry_price + tp_price) / 2, params={'reduceOnly': True})
-            print("止盈订单（卖出）已设置:", tp_order)
+            tp_order = exchange.create_take_profit_order(SYMBOL, 'limit', 'sell', actual_size, price=tp_price, takeProfitPrice=(entry_price + tp_price) / 2, params={'reduceOnly': True})
+            tp_order_id = tp_order['id']
+            print(f"止盈订单（卖出）已设置，订单ID: {tp_order_id}")
         
         elif signal == 'short_entry':
-            # 做空逻辑
-            order = exchange.create_market_sell_order(SYMBOL, 0.01)
-            print("市价卖出订单已提交:", order)
+            order = exchange.create_market_sell_order(SYMBOL, size)
+            order_id = order['id']
+            print(f"市价卖出订单已提交，订单ID: {order_id}")
+            is_long = False
 
             time.sleep(2)
-            filled_order = exchange.fetch_order(order['id'], SYMBOL)
+            filled_order = exchange.fetch_order(order_id, SYMBOL)
 
             if filled_order and filled_order['status'] == 'closed' and filled_order['average']:
                 entry_price = filled_order['average']
                 print(f"订单已成交，实际入场价: {entry_price}")
             else:
                 print("错误：无法获取订单成交价，取消设置止盈止损。")
+                return
+
+            actual_size = float(filled_order.get('filled', filled_order.get('amount', size)))
+            if actual_size <= 0:
+                print("错误：成交张数为0，取消止损止盈设置。")
                 return
 
             sl_price = entry_price + sl_distance
@@ -160,38 +166,34 @@ def strategy():  # 移除 is_long 参数，根据信号自动决定
                 SYMBOL, 
                 'market', 
                 'buy', 
-                0.01, 
+                actual_size, 
                 stopLossPrice=sl_price, 
                 params={'reduceOnly': True}
             )
-            print("止损订单（买入）已设置:", sl_order)
+            sl_order_id = sl_order['id']
+            print(f"止损订单（买入）已设置，订单ID: {sl_order_id}")
 
-            tp_order = exchange.create_take_profit_order(SYMBOL, 'limit', 'buy', 0.01, price=tp_price, takeProfitPrice=(entry_price + tp_price) / 2, params={'reduceOnly': True})
-            print("止盈订单（买入）已设置:", tp_order)
-
+            tp_order = exchange.create_take_profit_order(SYMBOL, 'limit', 'buy', actual_size, price=tp_price, takeProfitPrice=(entry_price + tp_price) / 2, params={'reduceOnly': True})
+            tp_order_id = tp_order['id']
+            print(f"止盈订单（买入）已设置，订单ID: {tp_order_id}")
+  
     except Exception as e:
         print(f"策略执行失败: {e}")
 
 def main():
-    while True:  # 开始时间遍历，循环执行策略
-        try:
-            # 获取当前 UTC 时间
-            now = datetime.now(timezone.utc)
-            current_minute = now.minute
-            
-            # 计算当前分钟除以 15 的余数
-            remainder = current_minute % 15
-            
-            # 计算需要等待的时间（分钟）
-            wait_minutes = 0 if remainder == 0 else 15 - remainder
-            
-            # 转换为秒
-            wait_seconds = wait_minutes * 60
-            
-            print(f"当前 UTC 时间: {now}, 分钟余数: {remainder}, 等待 {wait_minutes} 分钟 ({wait_seconds} 秒)")
-            
-            time.sleep(wait_seconds)
-            
+    try:
+        balance = exchange.fetch_balance()
+        print("API连接成功，余额:", balance['total']['USDT'])
+
+        leverage_to_set = int(FIXED_LEVERAGE)
+        exchange.set_leverage(leverage_to_set, SYMBOL, {'mgnMode': 'isolated'})
+        print(f"当前杠杆为：{leverage_to_set}")
+
+    except Exception as e:
+        print(f"API连接失败: {e}")
+    
+    while True:
+        try: 
             strategy()  # 调用策略
             
             time.sleep(60)  # 每次调用策略后休息 60 秒
@@ -201,7 +203,15 @@ def main():
             break
         except Exception as e:
             print(f"主循环错误: {e}")
-            time.sleep(60)  # 出错后等待1分钟再试
+            time.sleep(60)
 
 if __name__ == "__main__":
     main()
+
+
+
+            # 简化对齐逻辑
+            # now = datetime.now(timezone.utc)
+            # wait_seconds = (15 - (now.minute % 15)) * 60 - now.second
+            # print(f"等待 {wait_seconds} 秒到下一个15分钟整点")
+            # time.sleep(wait_seconds)
