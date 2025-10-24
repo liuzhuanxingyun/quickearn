@@ -17,7 +17,7 @@ git add <文件名>
 创建提交并添加消息：
 
 ```bash
-git commit -m "feat: Added email notification feature"
+git commit -m "fix： fix some bugs"
 ```
 
 ## 上传到github
