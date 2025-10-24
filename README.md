@@ -13,9 +13,24 @@
 
 ## 安装
 
-### 依赖项
-1. 克隆或下载项目到本地
-2. 安装主要依赖：
+### 1. 创建并激活 Conda 虚拟环境
+为了隔离项目依赖，建议使用 Conda 创建虚拟环境。
+
+1.  **创建环境** (将 `qe` 替换为您喜欢的名称):
+    ```bash
+    conda create -n qe python=3.12
+    ```
+    *注意：Conda 会安装一个可用的 Python 3.12.x 版本。*
+
+2.  **激活环境**:
+    ```bash
+    conda activate qe
+    ```
+
+### 2. 安装依赖项
+1. 克隆或下载项目到本地。
+
+2. 进入项目目录后，安装主要依赖：
    ```bash
    pip install -r requirements.txt
    ```
